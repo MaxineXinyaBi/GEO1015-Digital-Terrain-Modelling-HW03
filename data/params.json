@@ -1,0 +1,16 @@
+{
+  "input_file": "bk_subset1.laz",
+  "RANSAC": {
+    "k": 15,
+    "min_score": 15,
+    "epsilon": 0.3
+  },
+  "RegionGrowing": {
+    "k": 15,
+    "max_angle": 10.0
+  },
+  "HoughTransform": {
+    "alpha": 15,
+    "epsilon": 0.3
+  }
+}
