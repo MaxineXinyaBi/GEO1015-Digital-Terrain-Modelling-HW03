@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# environment 
+*env*/
+.env
+*venv*/
+ENV/
+
+# data
+*.csv
+*.dat
+*.log
+*.tmp
+
+# test
+test/
+*/test/
+**/test/
+*_test.py
+test_*.py
+trial.py
+*.pyc
+
+
+# documentation
+README.md
+
+LICENSE
