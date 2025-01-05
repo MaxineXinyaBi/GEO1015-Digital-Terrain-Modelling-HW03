@@ -20,6 +20,8 @@ ENV/
 *.dat
 *.log
 *.tmp
+*.ply
+*paramstest.json
 
 # test
 test/
@@ -30,6 +32,7 @@ test_*.py
 trial.py
 *.pyc
 
+*_test_geo1015_hw03.py
 
 # documentation
 
