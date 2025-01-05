@@ -202,8 +202,10 @@ def region_growing(seed_idx, pts, k, max_angle, normals):
 
             for neighbour_idx in neighbours:
                 if not processed_pt[neighbour_idx]:
-                    angle = normal_vector_angle(p, neighbour_idx, normals)
-                    if angle <= max_angle:
+                    seed_angle = normal_vector_angle(i, neighbour_idx, normals)
+                    current_angle = normal_vector_angle(p, neighbour_idx, normals)
+
+                    if seed_angle <= max_angle and current_angle <= max_angle:
                         s.add(neighbour_idx)
                         r.add(neighbour_idx)
                         processed_pt[neighbour_idx] = True
