@@ -22,7 +22,7 @@ def detect(lazfile, params, viz=False):
 
     k = params["k"]
     max_angle = np.radians(params["max_angle"])
-    min_planarity = 0.85
+    min_planarity = 0.8
 
     normals, linearity, planarity, sphericity = compute_normals_and_geometry_features(pts, k)
 
@@ -148,39 +148,14 @@ def compute_normals_and_geometry_features(pts, k):
 
 def select_seed_pts(pts, planarity, linearity, sphericity, min_planarity=0.8):
     """choose seed points"""
-    # 1. 更严格的几何特征条件
     mask = (
-            (planarity >= min_planarity) &  # 提高平面度要求
-            (planarity > 2.5 * linearity) &  # 确保平面特征明显优于线性特征
-            (planarity > 2.5 * sphericity) &  # 确保平面特征明显优于球形特征
-            (sphericity < 0.2)  # 降低球度阈值
+            (planarity >= min_planarity) &
+            (planarity > 2.5 * linearity) &
+            (planarity > 2.5 * sphericity) &
+            (sphericity < 0.2)
     )
-    initial_seeds = np.where(mask)[0]
+    final_seeds = np.where(mask)[0]
 
-    # 2. 空间均匀采样
-    grid_size = 1.0  # 根据点云尺度调整
-    coords = pts[initial_seeds]
-
-    grid_indices = {}
-    for idx, (x, y, z) in enumerate(coords):
-        grid_key = (int(x / grid_size), int(y / grid_size), int(z / grid_size))
-        if grid_key not in grid_indices:
-            grid_indices[grid_key] = []
-        grid_indices[grid_key].append(initial_seeds[idx])
-
-    # 3. 每个网格选择平面度最高的点
-    final_seeds = []
-    for grid_points in grid_indices.values():
-        best_point = max(grid_points, key=lambda x: planarity[x])
-        final_seeds.append(best_point)
-
-    # 4. 限制总数量
-    max_seeds = min(len(pts) // 6, 1500)  # 限制在约15%以内
-    if len(final_seeds) > max_seeds:
-        sorted_seeds = sorted(final_seeds, key=lambda x: planarity[x], reverse=True)
-        final_seeds = sorted_seeds[:max_seeds]
-
-    final_seeds = np.array(final_seeds)
 
     print("==> RegionGrowing")
     print(f"总点数: {len(pts)}")
