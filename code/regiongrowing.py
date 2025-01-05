@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import KDTree
-
+import time
+import rerun as rr
 
 def detect(lazfile, params, viz=False):
     """
@@ -19,9 +20,9 @@ def detect(lazfile, params, viz=False):
     """
     pts = np.vstack((lazfile.x, lazfile.y, lazfile.z)).transpose()
 
-    k = params["RegionGrowing"]["k"]
-    max_angle = np.radians(params["RegionGrowing"]["max_angle"])
-    min_planarity = 0.1
+    k = params["k"]
+    max_angle = np.radians(params["max_angle"])
+    min_planarity = 0.85
 
     normals, linearity, planarity, sphericity = compute_normals_and_geometry_features(pts, k)
 
@@ -35,11 +36,64 @@ def detect(lazfile, params, viz=False):
 
     result = np.column_stack((pts, segment_ids))
 
+    # rerun visualize
+    if viz:
+        # Initialize Rerun viewer
+        rr.init("plane_detection", spawn=True)
+
+        # Visualize all points initially
+        rr.log("all_points", rr.Points3D(pts, colors=[100, 100, 100], radii=0.1))
+
+        # Visualize segmented planes
+        num_segments = len(regions)
+        for i in range(1, num_segments + 1):
+            # Get points belonging to current segment
+            segment_points = pts[segment_ids == i]
+
+            # Generate random color for this segment
+            segment_color = [
+                np.random.randint(0, 255),
+                np.random.randint(0, 255),
+                np.random.randint(0, 255)
+            ]
+
+            # Log segment points
+            rr.log(
+                f"plane_segment_{i}",
+                rr.Points3D(
+                    segment_points,
+                    colors=segment_color,
+                    radii=0.1
+                )
+            )
+
+            # Log segment information
+            rr.log(
+                f"segment_{i}_info",
+                rr.TextLog(
+                    f"Segment {i} size: {len(segment_points)}",
+                    level=rr.TextLogLevel.TRACE
+                )
+            )
+
+            # Optional: visualize normals for this segment
+            segment_normals = normals[segment_ids == i]
+            rr.log(
+                f"normals_segment_{i}",
+                rr.Arrows3D(
+                    vectors=segment_normals * 0.5,
+                    origins=segment_points,
+                    colors=segment_color
+                )
+            )
+
+            time.sleep(0.1)
+
     return result
 
 
 
-def get_eigenvalues_eigen
+def get_eigenvalues_eigenvectors(points):
     centroid = np.mean(points, axis=0)
     centered_pts = points - centroid
     cov_matrix = np.dot(centered_pts.T, centered_pts)
@@ -92,22 +146,50 @@ def compute_normals_and_geometry_features(pts, k):
     return normals, linearity, planarity, sphericity
 
 
-def select_seed_pts(pts, planarity, linearity, sphericity, min_planarity = 0.1):
+def select_seed_pts(pts, planarity, linearity, sphericity, min_planarity=0.8):
     """choose seed points"""
-    mask = (linearity <= 0.8) & (sphericity <= 0.3) & (planarity >= min_planarity)
-    seed_indices = np.where(mask)[0]
+    # 1. 更严格的几何特征条件
+    mask = (
+            (planarity >= min_planarity) &  # 提高平面度要求
+            (planarity > 2.5 * linearity) &  # 确保平面特征明显优于线性特征
+            (planarity > 2.5 * sphericity) &  # 确保平面特征明显优于球形特征
+            (sphericity < 0.2)  # 降低球度阈值
+    )
+    initial_seeds = np.where(mask)[0]
 
+    # 2. 空间均匀采样
+    grid_size = 1.0  # 根据点云尺度调整
+    coords = pts[initial_seeds]
+
+    grid_indices = {}
+    for idx, (x, y, z) in enumerate(coords):
+        grid_key = (int(x / grid_size), int(y / grid_size), int(z / grid_size))
+        if grid_key not in grid_indices:
+            grid_indices[grid_key] = []
+        grid_indices[grid_key].append(initial_seeds[idx])
+
+    # 3. 每个网格选择平面度最高的点
+    final_seeds = []
+    for grid_points in grid_indices.values():
+        best_point = max(grid_points, key=lambda x: planarity[x])
+        final_seeds.append(best_point)
+
+    # 4. 限制总数量
+    max_seeds = min(len(pts) // 6, 1500)  # 限制在约15%以内
+    if len(final_seeds) > max_seeds:
+        sorted_seeds = sorted(final_seeds, key=lambda x: planarity[x], reverse=True)
+        final_seeds = sorted_seeds[:max_seeds]
+
+    final_seeds = np.array(final_seeds)
+
+    print("==> RegionGrowing")
     print(f"总点数: {len(pts)}")
-    print(f"选择的种子点数: {len(seed_indices)}")
-    print(f"种子点平面度范围: {planarity[seed_indices].min():.3f} - {planarity[seed_indices].max():.3f}")
+    print(f"选择的种子点数: {len(final_seeds)}")
+    print(f"种子点比例: {len(final_seeds) / len(pts) * 100:.2f}%")
+    print(f"种子点平面度范围: {planarity[final_seeds].min():.3f} - {planarity[final_seeds].max():.3f}")
 
-    return seed_indices
+    return final_seeds
 
-def get_neighbours_idx(pts, idx, k):
-    """find the neighbour index of a point"""
-    kdtree = KDTree(pts)
-    _, neighbours_idx = kdtree.query(pts[idx].reshape(1, -1), k=k)
-    return neighbours_idx[0]
 
 def unit_vector(vector):
     """ Returns the unit vector of the vector.  """
@@ -118,7 +200,7 @@ def normal_vector_angle(p1, p2, normals):
     p1_normal = normals[p1]
     p2_normal = normals[p2]
 
-    p1_unit = unit_vector(p1)
+    p1_unit = unit_vector(p1_normal)
     p2_unit = unit_vector(p2_normal)
 
     angle = np.arccos(np.clip(np.dot(p1_unit, p2_unit), -1.0, 1.0))
@@ -127,6 +209,7 @@ def normal_vector_angle(p1, p2, normals):
 
 
 def region_growing(seed_idx, pts, k, max_angle, normals):
+    kdtree = KDTree(pts)
     regions = []
     processed_pt = np.zeros(len(pts), dtype=bool)
 
@@ -140,20 +223,19 @@ def region_growing(seed_idx, pts, k, max_angle, normals):
 
         while s:
             p = s.pop()
-            neighbours = get_neighbours_idx(pts, p, k)
+            distances, neighbours = kdtree.query(pts[p], k=k)
 
             for neighbour_idx in neighbours:
-                angle = normal_vector_angle(p, neighbour_idx, normals)
-                if angle <= max_angle:
-                    s.add(neighbour_idx)
-                    r.add(neighbour_idx)
-                    processed_pt[neighbour_idx] = True
+                if not processed_pt[neighbour_idx]:
+                    angle = normal_vector_angle(p, neighbour_idx, normals)
+                    if angle <= max_angle:
+                        s.add(neighbour_idx)
+                        r.add(neighbour_idx)
+                        processed_pt[neighbour_idx] = True
 
         regions.append(list(r))
 
     return regions
-
-
 
 
 
