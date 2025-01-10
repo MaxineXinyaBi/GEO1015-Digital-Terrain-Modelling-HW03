@@ -3,6 +3,7 @@ from scipy.spatial import KDTree
 import time
 import rerun as rr
 
+
 def detect(lazfile, params, viz=False):
     """
     !!! TO BE COMPLETED !!!
@@ -33,6 +34,8 @@ def detect(lazfile, params, viz=False):
     segment_ids = np.zeros(len(pts), dtype=int)
     for i, region in enumerate(regions, start=1):
         segment_ids[region] = i
+
+    segment_ids = assign_uncategorized_points(pts, regions, segment_ids, normals, max_angle, k)
 
     result = np.column_stack((pts, segment_ids))
 
@@ -125,14 +128,14 @@ def compute_normals_and_geometry_features(pts, k):
 
         # corner pt
         if sphericity[i] > 0.3:
-            _, indices_large = kdtree.query(pts[i], k=k * 3)
-            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices_large])
+            _, indices = kdtree.query(pts[i], k=k * 3)
+            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices])
             normal = eigenvectors[:, 2]
 
         # edge pt
         elif linearity[i] > 0.8:
-            _, indices_large = kdtree.query(pts[i], k=k * 2)
-            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices_large])
+            _, indices = kdtree.query(pts[i], k=k * 3)
+            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices])
             normal = eigenvectors[:, 2]
 
         else:
@@ -152,7 +155,8 @@ def select_seed_pts(pts, planarity, linearity, sphericity, min_planarity=0.8):
             (planarity >= min_planarity) &
             (planarity > 2.5 * linearity) &
             (planarity > 2.5 * sphericity) &
-            (sphericity < 0.2)
+            (sphericity < 0.2) &
+            (linearity < 0.3)
     )
     final_seeds = np.where(mask)[0]
 
@@ -187,6 +191,7 @@ def region_growing(seed_idx, pts, k, max_angle, normals):
     kdtree = KDTree(pts)
     regions = []
     processed_pt = np.zeros(len(pts), dtype=bool)
+    min_region_size =  int(len(pts) * 0.01)
 
     for i in seed_idx:
         if processed_pt[i]:
@@ -210,9 +215,59 @@ def region_growing(seed_idx, pts, k, max_angle, normals):
                         r.add(neighbour_idx)
                         processed_pt[neighbour_idx] = True
 
-        regions.append(list(r))
+        if len(r) >= min_region_size:
+            regions.append(list(r))
+        else:
+            for pt in r:
+                processed_pt[pt] = False
+
 
     return regions
+
+
+def assign_uncategorized_points(pts, regions, segment_ids, normals, max_angle, k):
+    """ensure every point belongs to a region"""
+    unclassified = np.where(segment_ids == 0)[0]
+    if len(unclassified) == 0:
+        return segment_ids
+
+    region_normals = {}
+    for i, region in enumerate(regions, start=1):
+        region_normal = np.mean(normals[region], axis=0)
+        region_normal = region_normal / np.linalg.norm(region_normal)
+        region_normals[i] = region_normal
+
+    kdtree = KDTree(pts)
+
+    for pt_idx in unclassified:
+        distances, neighbors = kdtree.query(pts[pt_idx], k=k)
+        region_scores = {}
+        pt_normal = normals[pt_idx]
+
+        for dist,neighbor_idx  in zip(distances,neighbors):
+            if segment_ids[neighbor_idx] == 0:
+                continue
+
+            region_id = segment_ids[neighbor_idx]
+            if region_id not in region_scores:
+                region_scores[region_id] = 0
+
+            region_normal = region_normals[region_id]
+            angle = np.arccos(np.clip(np.dot(pt_normal, region_normal), -1.0, 1.0))
+
+            if angle <= max_angle:
+                score = (1.0 / (dist + 1e-6)) * (1.0 - angle / max_angle)
+                region_scores[region_id] += score
+
+        if region_scores:
+            best_region = max(region_scores.items(), key=lambda x: x[1])[0]
+            segment_ids[pt_idx] = best_region
+
+    return segment_ids
+
+
+
+
 
 
 
