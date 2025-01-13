@@ -27,29 +27,57 @@ def constructplane(points):
     return A, B, C, D
 
 
-def points_collinear(points):
+def points_collinear(points, threshold=2.0):
     """
-    Check if three points in 3D space are collinear.
-    
+    Check if three points in 3D space are collinear within a threshold.
+
     Parameters:
-    points (numpy.ndarray): A 2D numpy array of shape (3, 3), where each row represents a point [x, y, z].
+    points (numpy.ndarray): A 2D numpy array of shape (3, 3),
+                             where each row represents a point [x, y, z].
+    threshold (float): The collinearity threshold in meters. Default is 1.0.
 
     Returns:
-    bool: True if the points are collinear, False otherwise.
+    normal
+    normal magnitude
+    bool: True if the points are collinear within the given threshold, False otherwise.
     """
     # Extract the three points
     pt1, pt2, pt3 = points
-    
+
     # Create vectors from the points
     vec1 = pt2 - pt1
     vec2 = pt3 - pt1
-    
-    # Compute the cross product of the two vectors
-    cross_product = np.cross(vec1, vec2)
-    
-    # If the cross product is [0, 0, 0], the points are collinear
-    return np.all(cross_product == 0)
 
+    # Compute the cross product of the two vectors
+    normal = np.cross(vec1, vec2)
+
+    # Compute the magnitude of the cross product
+    normal_magnitude = np.linalg.norm(normal)
+
+    # Compute the area of the parallelogram formed by vec1 and vec2
+    # If the area is less than or equal to the threshold, the points are collinear
+    return normal, normal_magnitude, normal_magnitude <= threshold
+
+
+def calculate_plane_normal(normal, normal_magnitude):
+    """
+    Calculate the normal of a plane given an array of points.
+    Points should be a list or numpy array of shape (n, 3) where n >= 3.
+
+    Returns:
+    - is_pointing_up: Boolean indicating if the normal is pointing upwards (Z > 0).
+    """
+
+    if normal_magnitude == 0:
+        raise ValueError("The given points do not form a valid plane.")
+
+    normal = normal / normal_magnitude
+
+    # Allow a small tilt for considering horizontal (e.g., within 5 degrees)
+    tilt_threshold = np.deg2rad(5)  # Threshold in radians
+    is_horizontal = np.abs(np.arcsin(normal[0])) < tilt_threshold or np.abs(np.arcsin(normal[1])) < tilt_threshold
+
+    return is_horizontal
 
 def distance_pt_to_plane(A, B, C, D, pt):
     """
