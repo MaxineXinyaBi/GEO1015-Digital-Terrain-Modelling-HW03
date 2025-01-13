@@ -10,7 +10,10 @@
     "max_angle": 10.0
   },
   "HoughTransform": {
+    "radius": 1.0,
     "alpha": 15,
-    "epsilon": 0.3
+    "epsilon": 0.3,
+    "min_neighbors": 4,
+    "min_vertices": 10
   }
 }
