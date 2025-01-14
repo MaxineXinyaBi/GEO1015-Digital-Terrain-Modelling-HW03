@@ -1,112 +1,155 @@
 import numpy as np
-from scipy.spatial import ConvexHull, KDTree
 import rerun as rr
 
 
-# Helper function to extract planes from the accumulator
-def extract_planes(accumulator, alpha, ranges):
+def rht_detect_planes(points, params):
     """
-    Extract planes from the Hough accumulator based on thresholds and ranges.
-
-    Inputs:
-        accumulator: The 3D Hough accumulator array.
-        alpha: Threshold for votes to consider a plane.
-        ranges: Tuple with r_range, theta_range, phi_range.
-
-    Outputs:
-        planes: List of (r, theta, phi) tuples representing detected planes.
+    Randomized Hough Transform for plane detection.
     """
-    planes = []
-    r_range, theta_range, phi_range = ranges
+    # Parameters
+    alpha = params['alpha']
+    epsilon = params['epsilon']
 
-    indices = np.argwhere(accumulator > alpha)  # Use alpha threshold
-    for r_idx, theta_idx, phi_idx in indices:
-        r = r_range[r_idx]
-        theta = theta_range[theta_idx]
-        phi = phi_range[phi_idx]
-        planes.append((r, theta, phi))
+    # Initialize
+    N = len(points)
+    segment_ids = np.zeros(N, dtype=int)
+    current_segment = 1
+    remaining = np.ones(N, dtype=bool)
 
-    return planes
+    # Accumulator settings
+    n_theta = params['n_theta']  # -π to π
+    n_phi = params['n_phi']  # 0 to π
+    n_rho = params['n_rho']  # Distance bins
+
+    # calculate the range if rho
+    max_dist = 2.0 * np.max(np.linalg.norm(points, axis=1))
+    min_dist = -max_dist
+
+    while np.sum(remaining) > alpha:
+        # Initialize accumulator
+        accumulator = np.zeros((n_theta, n_phi, n_rho))
+        best_planes = {}  # store each bin's best plane param
+
+        # Sampling phase
+        n_samples = min(2000, N)
+
+        for _ in range(n_samples):
+            if np.sum(remaining) < 3:
+                break
+
+            # choose 3 points randomly
+            idx = np.random.choice(np.where(remaining)[0], 3, replace=False)
+            p1, p2, p3 = points[idx]
+
+            # calculate the plane's params计算平面参数
+            v1 = p2 - p1
+            v2 = p3 - p1
+            normal = np.cross(v1, v2)
+            norm = np.linalg.norm(normal)
+
+            if norm < 1e-10:
+                continue
+
+            normal = normal / norm
+            d = np.dot(normal, p1)
+
+            # calculate the coordinate on the sphere
+            phi = np.arccos(np.clip(normal[2], -1.0, 1.0))
+            theta = np.arctan2(normal[1], normal[0])
+
+            # Calculate accumulator index
+            theta_idx = int((theta + np.pi) * (n_theta - 1) / (2 * np.pi))
+            phi_idx = int(phi * (n_phi - 1) / np.pi)
+            rho_idx = int((d - min_dist) * (n_rho - 1) / (max_dist - min_dist))
+
+            # Check index range and vote
+            if (0 <= theta_idx < n_theta and
+                    0 <= phi_idx < n_phi and
+                    0 <= rho_idx < n_rho):
+                accumulator[theta_idx, phi_idx, rho_idx] += 1
+                # Storage plane parameters
+                key = (theta_idx, phi_idx, rho_idx)
+                best_planes[key] = (normal, d)
+
+        # Find the maximum vote
+        max_votes = np.max(accumulator)
+        if max_votes < alpha:
+            break
+
+        # Get the best plane parameters
+        max_idx = np.unravel_index(np.argmax(accumulator), accumulator.shape)
+        if max_idx not in best_planes:
+            continue
+
+        normal, d = best_planes[max_idx]
+
+        # Find the points that belong to this plane
+        remaining_points = points[remaining]
+        distances = np.abs(np.dot(remaining_points, normal) - d)
+        inliers = distances < epsilon
+
+        inlier_count = np.sum(inliers)
+        if inlier_count > alpha:
+            # Classification of recording points
+            remaining_idx = np.where(remaining)[0]
+            segment_ids[remaining_idx[inliers]] = current_segment
+            # Update remaining points
+            remaining[remaining_idx[inliers]] = False
+            current_segment += 1
+
+        # Additional check, stop if the number of points is too low
+        if np.sum(remaining) < alpha:
+            break
+
+    return segment_ids
 
 
-# Main plane detection function
 def detect(lazfile, params, viz=False):
     """
-    Detect planes in the input LAZ file using Hough Transform.
+    !!! TO BE COMPLETED !!!
+    !!! You are free to subdivide the functionality of this function into several functions !!!
+
+    Function that detects all the planes in the input LAZ file.
 
     Inputs:
-      lazfile: a laspy input file.
-      params: a dictionary with all the parameters necessary for the algorithm.
-      viz: whether the visualiser (rerun, or polyscope) should display results or not.
+      lazfile: a laspy input file
+      params: a dictionary with all the parameters necessary for the algorithm
+      viz: whether the visualiser (rerun, or polyscope) should be displaying results or not
 
     Output:
-      - a NumPy array Nx4; each point has x-y-z-segmentid.
+      - a NumPy array Nx4; each point has x-y-z-segmentid
     """
-    # Extract points from the LAZ file
+
+    # Extract points
     points = np.vstack((lazfile.x, lazfile.y, lazfile.z)).T
 
-    # Initialize segment IDs
-    segment_ids = np.zeros(points.shape[0], dtype=int)
+    # Center points
+    centroid = np.mean(points, axis=0)
+    points_centered = points - centroid
 
-    # KDTree for nearest neighbor search
-    kdtree = KDTree(points)
-    radius = params.get('radius', 1.0)
-    alpha = params.get('alpha', 15)  # Voting threshold
-    epsilon = params.get('epsilon', 0.5)  # Plane fitting tolerance
-    min_neighbors = params.get('min_neighbors', 4)
-    min_vertices = params.get('min_vertices', 10)
+    # Detect planes
+    segment_ids = rht_detect_planes(points_centered, params)
 
-    plane_id = 1  # Initialize plane ID
+    # Create output array
+    points_with_segments = np.column_stack((points, segment_ids))
 
-    for i, point in enumerate(points):
-        # Find neighbors within the radius
-        neighbors_idx = kdtree.query_ball_point(point, r=radius)
-        neighbors = points[neighbors_idx]
-
-        if len(neighbors) < min_neighbors:
-            continue
-
-        try:
-            hull = ConvexHull(neighbors)
-            if len(hull.vertices) > min_vertices:
-                # Further refine based on epsilon
-                distances = np.abs(
-                    np.dot(neighbors, hull.equations[:, :-1].T) + hull.equations[:, -1]
-                )
-                if np.all(distances < epsilon):
-                    segment_ids[neighbors_idx] = plane_id
-                    plane_id += 1
-        except Exception as e:
-            print(f"ConvexHull error at point {i}: {e}")
-            continue
-
-    points_with_segments = np.hstack((points, segment_ids[:, np.newaxis]))
-
+    # Visualize if requested
     if viz:
-        visualize_with_rerun(points_with_segments, segment_ids)
+        rr.init("Hough Transform Plane Detection", spawn=True)
+        rr.log("allpts", rr.Points3D(points, colors=[78, 205, 189], radii=0.1))
+
+        unique_segments = np.unique(segment_ids)
+        for seg_id in unique_segments:
+            if seg_id == 0:
+                continue
+            subset = points[segment_ids == seg_id]
+            rr.log(
+                f"subset_{seg_id}",
+                rr.Points3D(
+                    subset,
+                    colors=[np.random.randint(0, 255) for _ in range(3)],
+                    radii=0.1,
+                ),
+            )
 
     return points_with_segments
-
-
-def visualize_with_rerun(points_with_segments, segment_ids):
-    """Visualize points and segments using Rerun."""
-    rr.init("Hough Transform Plane Detection", spawn=True)
-    rr.log("allpts", rr.Points3D(points_with_segments[:, :3], colors=[78, 205, 189], radii=0.1))
-
-    unique_segments = np.unique(segment_ids)
-    for seg_id in unique_segments:
-        if seg_id == 0:
-            continue
-        subset = points_with_segments[points_with_segments[:, 3] == seg_id][:, :3]
-        rr.log(
-            f"subset_{seg_id}",
-            rr.Points3D(
-                subset,
-                colors=[
-                    np.random.randint(0, 255),
-                    np.random.randint(0, 255),
-                    np.random.randint(0, 255),
-                ],
-                radii=0.1,
-            ),
-        )
