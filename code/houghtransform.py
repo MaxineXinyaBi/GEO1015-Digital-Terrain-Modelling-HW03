@@ -9,6 +9,10 @@ def rht_detect_planes(points, params):
     # Parameters
     alpha = params['alpha']
     epsilon = params['epsilon']
+    neighborhood_radius = params['neighborhood_radius_1stplane']
+    
+    # Create KDTree for efficient point queries
+    pt_in_kdtree = KDTree(points)
 
     # Initialize
     N = len(points)
@@ -31,16 +35,26 @@ def rht_detect_planes(points, params):
         best_planes = {}  # store each bin's best plane param
 
         # Sampling phase
-        n_samples = min(2000, N)
+        n_samples = min(4000, N)
 
         for _ in range(n_samples):
             if np.sum(remaining) < 3:
                 break
 
-            # choose 3 points randomly
-            idx = np.random.choice(np.where(remaining)[0], 3, replace=False)
-            p1, p2, p3 = points[idx]
+            # Choose 1 random point
+            idx1 = np.random.choice(np.where(remaining)[0], 1)[0]
+            p1 = points[idx1]
 
+            # Find neighbors within the radius
+            neighbor_indices = pt_in_kdtree.query_ball_point(p1, neighborhood_radius)
+            neighbor_indices = [i for i in neighbor_indices if remaining[i] and i != idx1]
+
+            if len(neighbor_indices) < 2:
+                continue
+            # Select 2 additional random neighbors
+            idx2, idx3 = np.random.choice(neighbor_indices, 2, replace=False)
+            p2, p3 = points[idx2], points[idx3]
+            
             # calculate the plane's params计算平面参数
             v1 = p2 - p1
             v2 = p3 - p1
