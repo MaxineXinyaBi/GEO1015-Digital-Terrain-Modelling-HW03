@@ -102,18 +102,29 @@ def rht_detect_planes(points, params):
         distances = np.abs(np.dot(remaining_points, normal) - d)
         inliers = distances < epsilon
 
-        inlier_count = np.sum(inliers)
-        if inlier_count > alpha:
-            # Classification of recording points
-            remaining_idx = np.where(remaining)[0]
-            segment_ids[remaining_idx[inliers]] = current_segment
-            # Update remaining points
-            remaining[remaining_idx[inliers]] = False
-            current_segment += 1
+ # Apply neighbor distance filtering
+        inlier_points = remaining_points[inliers]
+
+        if len(inlier_points) < alpha:
+            continue
+
+        # Use clustering to filter out overextended regions
+        dbscan = DBSCAN(eps=params['max_inlier_distance'], min_samples=3)
+        clusters = dbscan.fit_predict(inlier_points)
+        largest_cluster = max(
+            set(clusters), key=lambda c: np.sum(clusters == c) if c != -1 else 0
+        )
+        filtered_inliers = (clusters == largest_cluster)
 
         # Additional check, stop if the number of points is too low
         if np.sum(remaining) < alpha:
             break
+
+        if np.sum(filtered_inliers) >= alpha:
+            remaining_idx = np.where(remaining)[0]
+            segment_ids[remaining_idx[inliers][filtered_inliers]] = current_segment
+            remaining[remaining_idx[inliers][filtered_inliers]] = False
+            current_segment += 1
 
     return segment_ids
 
