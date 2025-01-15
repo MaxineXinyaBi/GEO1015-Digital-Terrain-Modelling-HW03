@@ -7,7 +7,9 @@
   },
   "RegionGrowing": {
     "k": 15,
-    "max_angle": 10.0
+    "max_angle": 20.0,
+    "minimum_region_size": 100,
+    "minimum_planarity": 0.8
   },
   "HoughTransform": {
     "alpha": 15,

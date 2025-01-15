@@ -4,5 +4,11 @@
     "k": 15,
     "min_score": 15,
     "epsilon": 0.3
+  },
+  "RegionGrowing": {
+    "k": 15,
+    "max_angle": 20.0,
+    "minimum_region_size": 300,
+    "minimum_planarity": 0.8
   }
 }
