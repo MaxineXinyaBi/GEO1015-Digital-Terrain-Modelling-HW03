@@ -1,8 +1,8 @@
-import numpy as np
 from scipy.spatial import KDTree
 import time
 import rerun as rr
-
+from planedetection import *
+import numpy as np
 
 def detect(lazfile, params, viz=False):
     """
@@ -23,19 +23,28 @@ def detect(lazfile, params, viz=False):
 
     k = params["k"]
     max_angle = np.radians(params["max_angle"])
-    min_planarity = 0.8
+    min_planarity = params["minimum_planarity"]
+    min_region_size = params["minimum_region_size"]
 
+    # Step 1: Compute geometric features
     normals, linearity, planarity, sphericity = compute_normals_and_geometry_features(pts, k)
 
-    seed_indices = select_seed_pts(pts, planarity, linearity, sphericity, min_planarity)
+    # Step 2: Select seed points
+    seed_indices = select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity)
 
-    regions = region_growing(seed_indices, pts, k, max_angle, normals)
+    # Step 3: Grow regions from seeds
+    regions = region_growing(seed_indices, pts, k, max_angle, normals, min_region_size)
 
+    # Step 4: Initialize segmentation
     segment_ids = np.zeros(len(pts), dtype=int)
     for i, region in enumerate(regions, start=1):
         segment_ids[region] = i
 
-    segment_ids = assign_uncategorized_points(pts, regions, segment_ids, normals, max_angle, k)
+    # Step 5: Compute plane equations
+    plane_equations = region_equation(pts, regions)
+
+    # Step 6: Assign remaining points
+    segment_ids = assign_pts_to_planes(pts, plane_equations, segment_ids, distance_threshold=0.5)
 
     result = np.column_stack((pts, segment_ids))
 
@@ -46,6 +55,16 @@ def detect(lazfile, params, viz=False):
 
         # Visualize all points initially
         rr.log("all_points", rr.Points3D(pts, colors=[100, 100, 100], radii=0.1))
+
+        # Visualize normals for all points
+        rr.log(
+            "all_normals",
+            rr.Arrows3D(
+                vectors=normals * 0.5,
+                origins=pts,
+                colors=[0, 0, 0]
+            )
+        )
 
         # Visualize segmented planes
         num_segments = len(regions)
@@ -97,6 +116,7 @@ def detect(lazfile, params, viz=False):
 
 
 def get_eigenvalues_eigenvectors(points):
+    """get eigenvalues and eigenvectors of a plane"""
     centroid = np.mean(points, axis=0)
     centered_pts = points - centroid
     cov_matrix = np.dot(centered_pts.T, centered_pts)
@@ -105,7 +125,12 @@ def get_eigenvalues_eigenvectors(points):
     return eigenvalues[idx], eigenvectors[:, idx]
 
 def compute_normals_and_geometry_features(pts, k):
-    """compute the normal and geometry features of each point"""
+    """
+       Compute normal vectors and geometric features (linearity, planarity, sphericity)
+       for each point using its k nearest neighbors.
+
+       Returns normals and geometric features arrays for all points.
+       """
     kdtree = KDTree(pts)
     normals = np.zeros_like(pts)
     linearity = np.zeros(len(pts))
@@ -126,21 +151,10 @@ def compute_normals_and_geometry_features(pts, k):
             planarity[i] = (lambda2 - lambda3) / lambda1
             sphericity[i] = lambda3 / lambda1
 
-        # corner pt
-        if sphericity[i] > 0.3:
-            _, indices = kdtree.query(pts[i], k=k * 3)
-            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices])
-            normal = eigenvectors[:, 2]
 
-        # edge pt
-        elif linearity[i] > 0.8:
-            _, indices = kdtree.query(pts[i], k=k * 3)
-            eigenvalues, eigenvectors = get_eigenvalues_eigenvectors(pts[indices])
-            normal = eigenvectors[:, 2]
+        normal = eigenvectors[:, 2]
 
-        else:
-            normal = eigenvectors[:, 2]
-
+        # flip the normal vector if it is pointing inwards
         if normal[2] < 0:
             normal = -normal
 
@@ -149,23 +163,16 @@ def compute_normals_and_geometry_features(pts, k):
     return normals, linearity, planarity, sphericity
 
 
-def select_seed_pts(pts, planarity, linearity, sphericity, min_planarity=0.8):
+def select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity=0.8):
     """choose seed points"""
+    # good seed point should have least plane fitting error
     mask = (
             (planarity >= min_planarity) &
-            (planarity > 2.5 * linearity) &
-            (planarity > 2.5 * sphericity) &
-            (sphericity < 0.2) &
-            (linearity < 0.3)
+            (planarity >  linearity) &
+            (planarity >  sphericity)
+
     )
     final_seeds = np.where(mask)[0]
-
-
-    print("==> RegionGrowing")
-    print(f"总点数: {len(pts)}")
-    print(f"选择的种子点数: {len(final_seeds)}")
-    print(f"种子点比例: {len(final_seeds) / len(pts) * 100:.2f}%")
-    print(f"种子点平面度范围: {planarity[final_seeds].min():.3f} - {planarity[final_seeds].max():.3f}")
 
     return final_seeds
 
@@ -175,100 +182,155 @@ def unit_vector(vector):
     return vector / np.linalg.norm(vector)
 
 def normal_vector_angle(p1, p2, normals):
-    """calculate the normal vector angle of a point and neighbour point """
+    """calculate the angle between normal vectors
+    p1: index of the first pt,
+    p2: index of the second pt,
+    normals: the list to store the pt's normal"""
     p1_normal = normals[p1]
     p2_normal = normals[p2]
-
     p1_unit = unit_vector(p1_normal)
     p2_unit = unit_vector(p2_normal)
-
-    angle = np.arccos(np.clip(np.dot(p1_unit, p2_unit), -1.0, 1.0))
-
+    angle = np.arccos(np.clip(np.abs(np.dot(p1_unit, p2_unit)), -1.0, 1.0))
     return angle
 
 
-def region_growing(seed_idx, pts, k, max_angle, normals):
+def region_growing(seed_idx, pts, k, max_angle, normals, min_region_size):
+    """the main region growing function"""
+    print("\n=== Region Growing Debug Info ===")
+    print(f"Total points: {len(pts)}")
+    print(f"Number of seeds: {len(seed_idx)}")
+    print(
+        f"Parameters: k={k}, max_angle={np.degrees(max_angle):.2f}°, min_region_size={min_region_size}")
     kdtree = KDTree(pts)
+    # initialise the region list
     regions = []
+    # record pt that have been processed, the initial status is false
     processed_pt = np.zeros(len(pts), dtype=bool)
-    min_region_size =  int(len(pts) * 0.01)
 
-    for i in seed_idx:
-        if processed_pt[i]:
+    # looping all the seed
+    for seed_id in seed_idx:
+        # if the seed is already processed, jumping it
+        if processed_pt[seed_id]:
             continue
-
-        s = {i}
-        r = {i}
-        processed_pt[i] = True
-
-        while s:
-            p = s.pop()
-            distances, neighbours = kdtree.query(pts[p], k=k)
-
-            for neighbour_idx in neighbours:
-                if not processed_pt[neighbour_idx]:
-                    seed_angle = normal_vector_angle(i, neighbour_idx, normals)
-                    current_angle = normal_vector_angle(p, neighbour_idx, normals)
-
+        # add the seed_id into s and r
+        # s: the pt whose neighbors still needs to be checked
+        # r: pt in current region
+        s = {seed_id}
+        r = {seed_id}
+        while len(s):
+            current_pt = s.pop()
+            # searching the 20 neighbors of current pt
+            distance, neighbor_indices = kdtree.query(pts[current_pt], 20)
+            # looping every neighbor, if not in other regions, check if it belongs to this region
+            for neighbor_id in neighbor_indices:
+                if not processed_pt[neighbor_id]:
+                    # calculate the angle between normal vectors
+                    # with the region's seed
+                    # with current pt
+                    # distance = np.linalg.norm(pts[neighbor_id] - pts[current_pt])
+                    seed_angle = normal_vector_angle(seed_id, neighbor_id, normals)
+                    current_angle = normal_vector_angle(current_pt, neighbor_id, normals)
+                    # if it is within threshold, update s and r and processing status
                     if seed_angle <= max_angle and current_angle <= max_angle:
-                        s.add(neighbour_idx)
-                        r.add(neighbour_idx)
-                        processed_pt[neighbour_idx] = True
+                        s.add(neighbor_id)
+                        r.add(neighbor_id)
+                        processed_pt[neighbor_id] = True
 
+        # Only append regions that meet the minimum size requirement
         if len(r) >= min_region_size:
             regions.append(list(r))
-        else:
-            for pt in r:
-                processed_pt[pt] = False
-
 
     return regions
 
 
-def assign_uncategorized_points(pts, regions, segment_ids, normals, max_angle, k):
-    """ensure every point belongs to a region"""
-    unclassified = np.where(segment_ids == 0)[0]
-    if len(unclassified) == 0:
-        return segment_ids
-
-    region_normals = {}
-    for i, region in enumerate(regions, start=1):
-        region_normal = np.mean(normals[region], axis=0)
-        region_normal = region_normal / np.linalg.norm(region_normal)
-        region_normals[i] = region_normal
-
+def select_plane_points(pts,plane_searching_range=5):
+    """select points to construct plane equation"""
+    # the centre of the point cloud
     kdtree = KDTree(pts)
+    centroid = np.mean(pts, axis=0)
+
+    # the nearest point from centre
+    distances = np.linalg.norm(pts - centroid, axis=1)
+    first_idx = np.argmin(distances)
+    first_pt = pts[first_idx]
+
+    # find all the pts within 5 m distance from the first one
+    neighbour_indices = kdtree.query_ball_point(first_pt, plane_searching_range)
+    neighbour_pts =  pts[neighbour_indices]
+
+    # locate second pt, within 0.5 -2 m to 1st pt
+    distances_to_first = np.linalg.norm(neighbour_pts - first_pt, axis=1)
+    mask_2nd_pt =  (distances_to_first > 0.5) & (distances_to_first < 2)
+    valid_indices = np.where(mask_2nd_pt)[0]
+
+    if len(valid_indices) > 0:
+        second_idx = np.random.choice(valid_indices)
+        second_pt = neighbour_pts[second_idx]
+    else:
+        valid_indices = np.where(distances_to_first > 0.1)[0]
+        second_idx = valid_indices[0]
+        second_pt = neighbour_pts[second_idx]
+
+    # find the 3rd pt 0.5 - 2 m from the pt1 and pt2 line
+    line_vector = second_pt - first_pt
+    line_vector = line_vector / np.linalg.norm(line_vector)
+
+    # calculate the distance from the rest of the pts to line, choose the longest one
+    point_to_line_dist = []
+    for pt in neighbour_pts:
+        point_vector = pt - first_pt
+        dist = np.linalg.norm(np.cross(point_vector, line_vector))
+        if dist < 0.5 or dist > 2.0:
+            dist = 0
+        point_to_line_dist.append(dist)
+
+    third_idx = np.argmax(point_to_line_dist)
+    third_pt = neighbour_pts[third_idx]
+
+    return np.array([first_pt, second_pt, third_pt])
+
+
+def region_equation(pts, regions):
+    """calculate region equation"""
+    plane_equations = {}
+    for i, region in enumerate(regions, start=1):
+        region_pts = pts[region]
+
+        three_points = select_plane_points(region_pts)
+
+        if not points_collinear(three_points):
+            A, B, C, D = constructplane(three_points)
+            plane_equations[i] = (A, B, C, D)
+
+    return plane_equations
+
+
+def assign_pts_to_planes(pts, plane_equations, segment_ids, distance_threshold):
+    """
+    Assign remaining unclassified points to the nearest plane if within threshold.
+
+    Process:
+    1. Find unclassified points (segment_id = 0)
+    2. For each point, calculate distance to all planes
+    3. Assign to nearest plane if distance < threshold
+
+    Returns updated segment_ids array.
+    """
+    unclassified = np.where(segment_ids == 0)[0]
 
     for pt_idx in unclassified:
-        distances, neighbors = kdtree.query(pts[pt_idx], k=k)
-        region_scores = {}
-        pt_normal = normals[pt_idx]
+        point = pts[pt_idx]
+        min_dist = float('inf')
+        best_region = None
 
-        for dist,neighbor_idx  in zip(distances,neighbors):
-            if segment_ids[neighbor_idx] == 0:
-                continue
+        for region_id, (A, B, C, D) in plane_equations.items():
+            dist = distance_pt_to_plane(A, B, C, D, point)
+            if dist < distance_threshold and dist < min_dist:
+                min_dist = dist
+                best_region = region_id
 
-            region_id = segment_ids[neighbor_idx]
-            if region_id not in region_scores:
-                region_scores[region_id] = 0
-
-            region_normal = region_normals[region_id]
-            angle = np.arccos(np.clip(np.dot(pt_normal, region_normal), -1.0, 1.0))
-
-            if angle <= max_angle:
-                score = (1.0 / (dist + 1e-6)) * (1.0 - angle / max_angle)
-                region_scores[region_id] += score
-
-        if region_scores:
-            best_region = max(region_scores.items(), key=lambda x: x[1])[0]
+        if best_region is not None:
             segment_ids[pt_idx] = best_region
 
     return segment_ids
-
-
-
-
-
-
-
 
