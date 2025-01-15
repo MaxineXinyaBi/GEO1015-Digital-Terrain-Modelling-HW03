@@ -50,25 +50,32 @@ def detect(lazfile, params, viz=False):
 
     # KDTree for nearest neighbor search
     kdtree = KDTree(points)
-    radius = params.get('radius')
-    alpha = params.get('alpha')  # Voting threshold
-    epsilon = params.get('epsilon')  # Plane fitting tolerance
+    radius = params.get('radius', 1.0)
+    alpha = params.get('alpha', 15)  # Voting threshold
+    epsilon = params.get('epsilon', 0.5)  # Plane fitting tolerance
+    min_neighbors = params.get('min_neighbors', 4)
+    min_vertices = params.get('min_vertices', 10)
+
+    plane_id = 1  # Initialize plane ID
 
     for i, point in enumerate(points):
         # Find neighbors within the radius
         neighbors_idx = kdtree.query_ball_point(point, r=radius)
         neighbors = points[neighbors_idx]
 
-        if len(neighbors) < params.get('min_neighbors'):
+        if len(neighbors) < min_neighbors:
             continue
 
         try:
             hull = ConvexHull(neighbors)
-            if len(hull.vertices) > params.get('min_vertices'):
+            if len(hull.vertices) > min_vertices:
                 # Further refine based on epsilon
-                distances = np.abs(np.dot(neighbors - point, hull.equations[:, :-1].T))
+                distances = np.abs(
+                    np.dot(neighbors, hull.equations[:, :-1].T) + hull.equations[:, -1]
+                )
                 if np.all(distances < epsilon):
-                    segment_ids[i] = 1  # Example: Assign a single segment ID
+                    segment_ids[neighbors_idx] = plane_id
+                    plane_id += 1
         except Exception as e:
             print(f"ConvexHull error at point {i}: {e}")
             continue
