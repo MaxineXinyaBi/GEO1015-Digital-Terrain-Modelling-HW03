@@ -122,9 +122,21 @@ def rht_detect_planes(points, params):
         )
         filtered_inliers = (clusters == largest_cluster)
 
-        # Additional check, stop if the number of points is too low
-        if np.sum(remaining) < alpha:
-            break
+
+        # Geometric Filtering: Use Convex Hull to prevent lines
+        if np.sum(filtered_inliers) >= alpha:
+            print('test convex hull')
+            hull = ConvexHull(inlier_points[filtered_inliers])
+            hull_dimensions = np.ptp(hull.points, axis=0)  # Peak-to-peak
+            sorted_dimensions = np.sort(hull_dimensions)# distances
+            aspect_ratio = sorted_dimensions[2] / sorted_dimensions[1]
+            # Check thresholds for validity
+
+            max_hull_aspect_ratio = params.get('max_hull_aspect_ratio')
+
+            if aspect_ratio > max_hull_aspect_ratio:
+                print('rejected')
+                continue  # Reject this plane
 
         if np.sum(filtered_inliers) >= alpha:
             remaining_idx = np.where(remaining)[0]
