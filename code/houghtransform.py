@@ -1,6 +1,7 @@
 import numpy as np
 import rerun as rr
-
+from scipy.spatial import KDTree, ConvexHull
+from sklearn.cluster import DBSCAN
 
 def rht_detect_planes(points, params):
     """
@@ -28,6 +29,7 @@ def rht_detect_planes(points, params):
     # calculate the range if rho
     max_dist = 2.0 * np.max(np.linalg.norm(points, axis=1))
     min_dist = -max_dist
+    vote_fail=0
 
     while np.sum(remaining) > alpha:
         # Initialize accumulator
@@ -35,7 +37,7 @@ def rht_detect_planes(points, params):
         best_planes = {}  # store each bin's best plane param
 
         # Sampling phase
-        n_samples = min(4000, N)
+        n_samples = min(params['n_samples'], N)
 
         for _ in range(n_samples):
             if np.sum(remaining) < 3:
@@ -88,7 +90,11 @@ def rht_detect_planes(points, params):
         # Find the maximum vote
         max_votes = np.max(accumulator)
         if max_votes < alpha:
-            break
+            vote_fail+=1
+            if vote_fail>params['max_vote_fails']:
+                break
+            else:
+                continue
 
         # Get the best plane parameters
         max_idx = np.unravel_index(np.argmax(accumulator), accumulator.shape)
