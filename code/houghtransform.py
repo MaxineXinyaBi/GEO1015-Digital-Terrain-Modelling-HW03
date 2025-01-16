@@ -3,6 +3,7 @@ import rerun as rr
 from scipy.spatial import KDTree, ConvexHull
 from sklearn.cluster import DBSCAN
 
+
 def rht_detect_planes(points, params):
     """
     Randomized Hough Transform for plane detection.
@@ -11,7 +12,7 @@ def rht_detect_planes(points, params):
     alpha = params['alpha']
     epsilon = params['epsilon']
     neighborhood_radius = params['neighborhood_radius_1stplane']
-    
+
     # Create KDTree for efficient point queries
     pt_in_kdtree = KDTree(points)
 
@@ -29,9 +30,10 @@ def rht_detect_planes(points, params):
     # calculate the range if rho
     max_dist = 2.0 * np.max(np.linalg.norm(points, axis=1))
     min_dist = -max_dist
-    vote_fail=0
+    ins_points_in_plane_count=0
 
     while np.sum(remaining) > alpha:
+        print(f'Remaining points: {np.sum(remaining)}')
         # Initialize accumulator
         accumulator = np.zeros((n_theta, n_phi, n_rho))
         best_planes = {}  # store each bin's best plane param
@@ -56,7 +58,7 @@ def rht_detect_planes(points, params):
             # Select 2 additional random neighbors
             idx2, idx3 = np.random.choice(neighbor_indices, 2, replace=False)
             p2, p3 = points[idx2], points[idx3]
-            
+
             # calculate the plane's params计算平面参数
             v1 = p2 - p1
             v2 = p3 - p1
@@ -89,12 +91,6 @@ def rht_detect_planes(points, params):
 
         # Find the maximum vote
         max_votes = np.max(accumulator)
-        if max_votes < alpha:
-            vote_fail+=1
-            if vote_fail>params['max_vote_fails']:
-                break
-            else:
-                continue
 
         # Get the best plane parameters
         max_idx = np.unravel_index(np.argmax(accumulator), accumulator.shape)
@@ -108,11 +104,8 @@ def rht_detect_planes(points, params):
         distances = np.abs(np.dot(remaining_points, normal) - d)
         inliers = distances < epsilon
 
- # Apply neighbor distance filtering
+        # Apply neighbor distance filtering
         inlier_points = remaining_points[inliers]
-
-        if len(inlier_points) < alpha:
-            continue
 
         # Use clustering to filter out overextended regions
         dbscan = DBSCAN(eps=params['max_inlier_distance'], min_samples=3)
@@ -122,27 +115,38 @@ def rht_detect_planes(points, params):
         )
         filtered_inliers = (clusters == largest_cluster)
 
+        # Geometric Filtering: Use Convex Hull
 
-        # Geometric Filtering: Use Convex Hull to prevent lines
-        if np.sum(filtered_inliers) >= alpha:
-            print('test convex hull')
-            hull = ConvexHull(inlier_points[filtered_inliers])
-            hull_dimensions = np.ptp(hull.points, axis=0)  # Peak-to-peak
-            sorted_dimensions = np.sort(hull_dimensions)# distances
-            aspect_ratio = sorted_dimensions[2] / sorted_dimensions[1]
-            # Check thresholds for validity
+        print('test convex hull')
+        hull = ConvexHull(inlier_points[filtered_inliers])
+        hull_dimensions = np.ptp(hull.points, axis=0)  # Peak-to-peak
+        sorted_dimensions = np.sort(hull_dimensions)# distances
+        aspect_ratio = sorted_dimensions[2] / sorted_dimensions[1]
+        # Check thresholds for validity
 
-            max_hull_aspect_ratio = params.get('max_hull_aspect_ratio')
+        max_hull_aspect_ratio = params.get('max_hull_aspect_ratio')
 
-            if aspect_ratio > max_hull_aspect_ratio:
-                print('rejected')
-                continue  # Reject this plane
+        if aspect_ratio > max_hull_aspect_ratio:
+            print('rejected')
+            continue  # Reject this plane
 
-        if np.sum(filtered_inliers) >= alpha:
-            remaining_idx = np.where(remaining)[0]
-            segment_ids[remaining_idx[inliers][filtered_inliers]] = current_segment
-            remaining[remaining_idx[inliers][filtered_inliers]] = False
-            current_segment += 1
+
+        remaining_idx = np.where(remaining)[0]
+        segment_ids[remaining_idx[inliers][filtered_inliers]] = current_segment
+        num_points_in_plane = len(remaining_idx[inliers][filtered_inliers])
+        if num_points_in_plane<alpha:
+            print('not enough points in plane')
+            ins_points_in_plane_count+=1
+            if ins_points_in_plane_count>=params['max_ins_points_in_plane_counts']:
+                break
+            else:
+                continue
+
+        remaining[remaining_idx[inliers][filtered_inliers]] = False
+        current_segment += 1
+        print('plane detected')
+
+
 
     return segment_ids
 
