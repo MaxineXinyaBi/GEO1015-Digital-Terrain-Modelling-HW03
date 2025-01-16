@@ -4,7 +4,7 @@
     "k": 1000,
     "min_score": 200,
     "epsilon": 0.15,
-    "neighborhood_radius_allplanes": 45,
+    "neighborhood_radius_allplanes": 47,
     "neighborhood_radius_1stplane": 2
   },
   "RegionGrowing": {
