@@ -5,6 +5,10 @@ import json
 import os
 import sys
 from pathlib import Path
+import time
+
+
+
 
 import houghtransform
 import laspy
@@ -16,9 +20,10 @@ RERUN_VIZ = True
 
 
 def main():
+
     # -- get the path to the params.json (assuming the directory as in the git repository)
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    param_path = dir_path + "/../data/params.json"
+    param_path = dir_path + "/../data/params2.json"
     # -- or you can supply the params.json as the first argument to this program
     if len(sys.argv) == 2:
         param_path = sys.argv[1]
