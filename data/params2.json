@@ -7,4 +7,21 @@
     "neighborhood_radius_allplanes": 45,
     "neighborhood_radius_1stplane": 2
   }
+   },
+  "RegionGrowing": {
+    "k": 15,
+    "max_angle": 10.0
+  },
+  "HoughTransform": {
+    "alpha": 4,
+    "epsilon": 0.4,
+    "n_theta": 90,
+    "n_phi": 90,
+    "n_rho": 90,
+    "neighborhood_radius_1stplane": 3.0,
+    "max_inlier_distance": 1.5,
+    "max_hull_aspect_ratio": 15,
+    "n_samples": 2000,
+    "max_ins_points_in_plane_counts": 10
+    }
 }
