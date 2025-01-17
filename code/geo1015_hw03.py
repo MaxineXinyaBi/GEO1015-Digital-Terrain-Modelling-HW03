@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 import time
-# from memory_profiler import profile
+
 
 
 
@@ -18,9 +18,8 @@ import regiongrowing
 RERUN_VIZ = False
 RERUN_VIZ = True
 
-# @profile
+
 def main():
-    # start_time = time.time()
 
     # -- get the path to the params.json (assuming the directory as in the git repository)
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -39,21 +38,18 @@ def main():
         print(e)
         sys.exit()
 
-    # if "RANSAC" in jparams:
-    #     print("==> RANSAC")
-    #     pts = ransac.detect(lazfile, jparams["RANSAC"], RERUN_VIZ)
-    #     write_ply(pts, "out_ransac.ply")
+    if "RANSAC" in jparams:
+        print("==> RANSAC")
+        pts = ransac.detect(lazfile, jparams["RANSAC"], RERUN_VIZ)
+        write_ply(pts, "out_ransac.ply")
     if "RegionGrowing" in jparams:
         print("==> RegionGrowing")
         pts = regiongrowing.detect(lazfile, jparams["RegionGrowing"], RERUN_VIZ)
         write_ply(pts, "out_regiongrowing.ply")
-    # if "HoughTransform" in jparams:
-    #     print("==> HoughTransform")
-    #     pts = houghtransform.detect(lazfile, jparams["RegionGrowing"], RERUN_VIZ)
-    #     write_ply(pts, "out_houghtransform.ply")
-    # end_time = time.time()
-    # elapsed_time = end_time - start_time
-    # print(f"Elapsed time: {elapsed_time}")
+    if "HoughTransform" in jparams:
+        print("==> HoughTransform")
+        pts = houghtransform.detect(lazfile, jparams["RegionGrowing"], RERUN_VIZ)
+        write_ply(pts, "out_houghtransform.ply")
 
 
 def write_ply(pts, filename):
