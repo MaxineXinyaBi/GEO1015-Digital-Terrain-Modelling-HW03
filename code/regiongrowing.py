@@ -31,7 +31,7 @@ def detect(lazfile, params, viz=False):
     normals, linearity, planarity, sphericity = compute_normals_and_geometry_features(pts, k)
 
     # Step 2: Select seed points
-    seed_indices = select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity)
+    seed_indices = select_seed_pts(planarity, linearity, sphericity, min_planarity)
 
     # Step 3: Grow regions from seeds
     regions = region_growing(seed_indices, pts, k, max_angle, normals, min_region_size)
@@ -57,15 +57,6 @@ def detect(lazfile, params, viz=False):
         # Visualize all points initially
         rr.log("all_points", rr.Points3D(pts, colors=[100, 100, 100], radii=0.1))
 
-        # Visualize normals for all points
-        # rr.log(
-        #     "all_normals",
-        #     rr.Arrows3D(
-        #         vectors=normals * 0.5,
-        #         origins=pts,
-        #         colors=[0, 0, 0]
-        #     )
-        # )
 
         # Visualize segmented planes
         num_segments = len(regions)
@@ -99,16 +90,6 @@ def detect(lazfile, params, viz=False):
                 )
             )
 
-            # # Optional: visualize normals for this segment
-            # segment_normals = normals[segment_ids == i]
-            # rr.log(
-            #     f"normals_segment_{i}",
-            #     rr.Arrows3D(
-            #         vectors=segment_normals * 0.5,
-            #         origins=segment_points,
-            #         colors=segment_color
-            #     )
-            # )
 
             time.sleep(0.1)
 
@@ -164,7 +145,7 @@ def compute_normals_and_geometry_features(pts, k):
     return normals, linearity, planarity, sphericity
 
 
-def select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity):
+def select_seed_pts(planarity, linearity, sphericity, min_planarity):
     """choose seed points"""
     # good seed point should have least plane fitting error
     mask = (
