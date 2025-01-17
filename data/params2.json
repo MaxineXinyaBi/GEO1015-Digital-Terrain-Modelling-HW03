@@ -21,7 +21,6 @@
     "n_rho": 360,
     "neighborhood_radius_1stplane": 2.0,
     "max_inlier_distance": 0.5,
-    "max_hull_aspect_ratio": 15,
     "n_samples": 4000,
     "max_ins_points_in_plane_counts": 100
     }
