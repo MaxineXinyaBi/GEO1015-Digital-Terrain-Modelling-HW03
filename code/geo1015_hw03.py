@@ -11,6 +11,8 @@ import time
 import laspy
 
 import regiongrowing
+import ransac
+import houghtransform
 
 RERUN_VIZ = False
 RERUN_VIZ = True
