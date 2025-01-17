@@ -8,7 +8,7 @@
   "RegionGrowing": {
     "k": 15,
     "max_angle": 20.0,
-    "minimum_region_size": 300,
+    "minimum_region_size": 50,
     "minimum_planarity": 0.8
   }
 }
