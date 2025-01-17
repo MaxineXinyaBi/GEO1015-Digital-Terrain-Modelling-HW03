@@ -1,4 +1,3 @@
-import time
 import rerun as rr
 import laspy
 import planedetection as pd
@@ -74,7 +73,6 @@ def merge_similar_planes(plane_segments, p, angular_tolerance=20):
 
     :param plane_segments: List of tuples (plane_id, points_in_plane, plane_normal, centroid)
     :param p: Original point cloud
-    :param distance_threshold: Maximum allowed bounding box overlap distance for merging
     :param angular_tolerance: Maximum angular difference (in degrees) for merging plane normals
     :return: Merged point cloud with plane segment IDs
     """
@@ -174,7 +172,7 @@ def detect(lazfile, params, viz=False):
     while point_mask.sum() >= 3: # Continue while enough points are available
         sbest, best_plane_points = 0, None
 
-        # k iterations
+        # Step 0: k iterations
         for _ in range(k):
             available_indices = np.where(point_mask)[0]
 
@@ -194,28 +192,42 @@ def detect(lazfile, params, viz=False):
             if len(neighbor_indices) < 2:
                 continue
 
+            # Step 2: Get two further random points neighbour to the first point
             other_indices = np.random.choice(neighbor_indices, size=2, replace=False)
 
             random_indices = np.array([first_index, other_indices[0], other_indices[1]])
             M_randompoints = p[random_indices]
 
+            # Step 3: Check if points are collinear
             normal, normal_magnitude, collinear = pd.points_collinear(M_randompoints)
 
             if not collinear:
+                # Step 4: Construct plane
                 A, B, C, D = pd.constructplane(M_randompoints)
+
+                # Step 4: Calculate mean points
                 centroid = np.mean(M_randompoints, axis=0)
+
+                # Step 5: Calculate distances from points to plane
                 distances = np.abs(A * p[:, 0] + B * p[:, 1] + C * p[:, 2] + D) / np.sqrt(A ** 2 + B ** 2 + C ** 2)
 
+                # Step 6: Calculate neighbour points
                 neighbor_indices_1 = pt_in_kdtree.query_ball_point(centroid, neighborhood_radius_allplanes)
+                
+                # Step 7: Check points closer to epsilon
+
                 valid_indices = np.where((distances < epsilon) & point_mask)[0]
 
+                # Step 7: Choose valid points
                 valid_in_neighbors = valid_indices[np.isin(valid_indices, neighbor_indices_1)]
 
+                # Step 8: Update points list if it contains more points
                 s = len(valid_in_neighbors)
                 if s > sbest:
                     sbest = s
                     best_plane_points = valid_in_neighbors
 
+        # Step 8: If this is larger than the minimum amount (min_score), save it to plane segments
         if sbest >= min_score:
             # segmented_points = np.column_stack((p[best_plane_points], np.full(sbest, segment_id)))
             centroid = np.mean(p[best_plane_points], axis=0)
@@ -225,8 +237,10 @@ def detect(lazfile, params, viz=False):
         else:
             break
 
+    # Step 9: Merge similar planes
     pts = merge_similar_planes(plane_segments, p)
 
+    # Step 10: Visualise
     if viz:
         rr.init("myview", spawn=True)
         rr.log("allpts", rr.Points3D(pts[:, :3], colors=[78, 205, 189], radii=0.1))
