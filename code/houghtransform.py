@@ -4,60 +4,50 @@ from scipy.spatial import KDTree, ConvexHull
 from sklearn.cluster import DBSCAN
 
 
+
+
 def rht_detect_planes(points, params):
     """
-    Randomized Hough Transform for plane detection with improvements.
-
-    Args:
-        points (np.ndarray): The input 3D points (Nx3).
-        params (dict): Parameters for the Hough Transform algorithm.
-
-    Returns:
-        np.ndarray: An array of segment IDs for each point.
+    Randomized Hough Transform for plane detection.
     """
     # Parameters
     alpha = params['alpha']
     epsilon = params['epsilon']
     neighborhood_radius = params['neighborhood_radius_1stplane']
-    n_theta = params['n_theta']
-    n_phi = params['n_phi']
-    n_rho = params['n_rho']
-    max_inlier_distance = params['max_inlier_distance']
-    max_hull_aspect_ratio = params.get('max_hull_aspect_ratio')
-    max_ins_points_in_plane_counts = params.get('max_ins_points_in_plane_counts')
 
-    # KDTree for efficient neighbor search
+    # Create KDTree for efficient point queries
     pt_in_kdtree = KDTree(points)
 
-    # Initialize variables
+    # Initialize
     N = len(points)
     segment_ids = np.zeros(N, dtype=int)
     current_segment = 1
     remaining = np.ones(N, dtype=bool)
 
-    # Calculate the range for rho
+    # Accumulator settings
+    n_theta = params['n_theta']  # -π to π
+    n_phi = params['n_phi']  # 0 to π
+    n_rho = params['n_rho']  # Distance bins
+
+    # calculate the range if rho
     max_dist = 2.0 * np.max(np.linalg.norm(points, axis=1))
     min_dist = -max_dist
-    insufficient_plane_count = 0
+    ins_points_in_plane_count=0
 
     while np.sum(remaining) > alpha:
-        remaining_count = np.sum(remaining)
-        print(f"Remaining points: {remaining_count}")
-
-        # Stop if remaining points are too few
-        if remaining_count < 10:
-            print("Remaining points too few, stopping detection.")
-            break
-
+        print(f'Remaining points: {np.sum(remaining)}')
         # Initialize accumulator
         accumulator = np.zeros((n_theta, n_phi, n_rho))
-        best_planes = {}
+        best_planes = {}  # store each bin's best plane param
 
         # Sampling phase
-        n_samples = min(params['n_samples'], remaining_count)
+        n_samples = min(params['n_samples'], N)
 
         for _ in range(n_samples):
-            # Random point selection
+            if np.sum(remaining) < 3:
+                break
+
+            # Choose 1 random point
             idx1 = np.random.choice(np.where(remaining)[0], 1)[0]
             p1 = points[idx1]
 
@@ -67,12 +57,11 @@ def rht_detect_planes(points, params):
 
             if len(neighbor_indices) < 2:
                 continue
-
-            # Select two additional random neighbors
+            # Select 2 additional random neighbors
             idx2, idx3 = np.random.choice(neighbor_indices, 2, replace=False)
             p2, p3 = points[idx2], points[idx3]
 
-            # Calculate plane parameters
+            # calculate the plane's params计算平面参数
             v1 = p2 - p1
             v2 = p3 - p1
             normal = np.cross(v1, v2)
@@ -84,7 +73,7 @@ def rht_detect_planes(points, params):
             normal = normal / norm
             d = np.dot(normal, p1)
 
-            # Calculate spherical coordinates
+            # calculate the coordinate on the sphere
             phi = np.arccos(np.clip(normal[2], -1.0, 1.0))
             theta = np.arctan2(normal[1], normal[0])
 
@@ -93,19 +82,19 @@ def rht_detect_planes(points, params):
             phi_idx = int(phi * (n_phi - 1) / np.pi)
             rho_idx = int((d - min_dist) * (n_rho - 1) / (max_dist - min_dist))
 
-            # Vote in accumulator
+            # Check index range and vote
             if (0 <= theta_idx < n_theta and
                     0 <= phi_idx < n_phi and
                     0 <= rho_idx < n_rho):
                 accumulator[theta_idx, phi_idx, rho_idx] += 1
-                best_planes[(theta_idx, phi_idx, rho_idx)] = (normal, d)
+                # Storage plane parameters
+                key = (theta_idx, phi_idx, rho_idx)
+                best_planes[key] = (normal, d)
 
         # Find the maximum vote
         max_votes = np.max(accumulator)
-        if max_votes < alpha:
-            print("Not enough votes, stopping detection.")
-            break
 
+        # Get the best plane parameters
         max_idx = np.unravel_index(np.argmax(accumulator), accumulator.shape)
         if max_idx not in best_planes:
             continue
@@ -117,62 +106,52 @@ def rht_detect_planes(points, params):
         distances = np.abs(np.dot(remaining_points, normal) - d)
         inliers = distances < epsilon
 
+        # Apply neighbor distance filtering
         inlier_points = remaining_points[inliers]
 
-        # Apply DBSCAN for clustering
-        dbscan = DBSCAN(eps=max_inlier_distance, min_samples=4)
+        # Use clustering to filter out overextended regions
+        dbscan = DBSCAN(eps=params['max_inlier_distance'], min_samples=3)
         clusters = dbscan.fit_predict(inlier_points)
+        largest_cluster = max(
+            set(clusters), key=lambda c: np.sum(clusters == c) if c != -1 else 0
+        )
+        filtered_inliers = (clusters == largest_cluster)
 
-        # Select the largest cluster
-        if len(set(clusters)) > 1:
-            largest_cluster = max(
-                set(clusters), key=lambda c: np.sum(clusters == c) if c != -1 else 0
-            )
-            filtered_inliers = (clusters == largest_cluster)
-        else:
-            filtered_inliers = (clusters != -1)  # Use all points if no clustering
+        # Geometric Filtering: Use Convex Hull
 
-        # Check if there are enough points for ConvexHull
-        if np.sum(filtered_inliers) < 4:
-            print("Not enough points for ConvexHull, skipping this plane.")
-            continue
-
-        try:
-            # Apply ConvexHull filtering
+        print('test convex hull')
+        if np.sum(filtered_inliers) >= 4: # Ensure enough points for ConvexHull
             hull = ConvexHull(inlier_points[filtered_inliers])
-            hull_dimensions = np.ptp(hull.points, axis=0)
-            sorted_dimensions = np.sort(hull_dimensions)
+            hull_dimensions = np.ptp(hull.points, axis=0)  # Peak-to-peak
+            sorted_dimensions = np.sort(hull_dimensions)# distances
             aspect_ratio = sorted_dimensions[2] / sorted_dimensions[1]
+            # Check thresholds for validity
+
+            max_hull_aspect_ratio = params.get('max_hull_aspect_ratio')
 
             if aspect_ratio > max_hull_aspect_ratio:
-                print(f"Rejected due to aspect ratio: {aspect_ratio}")
-                continue
+                print('rejected')
+                continue  # Reject this plane
 
-        except Exception as e:
-            print(f"ConvexHull failed: {e}")
-            continue
 
-        # Update segment IDs and mark points as processed
         remaining_idx = np.where(remaining)[0]
         segment_ids[remaining_idx[inliers][filtered_inliers]] = current_segment
         num_points_in_plane = len(remaining_idx[inliers][filtered_inliers])
-
-        # Stop if the plane has too few points
-        if num_points_in_plane < alpha:
-            print("Not enough points in plane, skipping.")
-            insufficient_plane_count += 1
-            if insufficient_plane_count >= max_ins_points_in_plane_counts:
-                print("Too many insufficient planes, stopping detection.")
+        if num_points_in_plane<alpha:
+            print('not enough points in plane')
+            ins_points_in_plane_count+=1
+            if ins_points_in_plane_count>=params['max_ins_points_in_plane_count']:
                 break
             else:
                 continue
 
         remaining[remaining_idx[inliers][filtered_inliers]] = False
         current_segment += 1
-        print("Plane detected")
+        print('plane detected')
+
+
 
     return segment_ids
-    
 
 
 def detect(lazfile, params, viz=False):
