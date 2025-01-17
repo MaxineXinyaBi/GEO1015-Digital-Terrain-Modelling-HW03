@@ -57,15 +57,6 @@ def detect(lazfile, params, viz=False):
         # Visualize all points initially
         rr.log("all_points", rr.Points3D(pts, colors=[100, 100, 100], radii=0.1))
 
-        # Visualize normals for all points
-        # rr.log(
-        #     "all_normals",
-        #     rr.Arrows3D(
-        #         vectors=normals * 0.5,
-        #         origins=pts,
-        #         colors=[0, 0, 0]
-        #     )
-        # )
 
         # Visualize segmented planes
         num_segments = len(regions)
@@ -99,16 +90,6 @@ def detect(lazfile, params, viz=False):
                 )
             )
 
-            # # Optional: visualize normals for this segment
-            # segment_normals = normals[segment_ids == i]
-            # rr.log(
-            #     f"normals_segment_{i}",
-            #     rr.Arrows3D(
-            #         vectors=segment_normals * 0.5,
-            #         origins=segment_points,
-            #         colors=segment_color
-            #     )
-            # )
 
             time.sleep(0.1)
 
