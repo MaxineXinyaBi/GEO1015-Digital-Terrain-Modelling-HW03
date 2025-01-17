@@ -27,7 +27,6 @@ def constructplane(points):
     return A, B, C, D
 
 
-<<<<<<< HEAD
 def points_collinear(points, threshold=2.0):
     """
     Check if three points in 3D space are collinear within a threshold.
@@ -79,31 +78,7 @@ def calculate_plane_normal(normal, normal_magnitude):
     is_horizontal = np.abs(np.arcsin(normal[0])) < tilt_threshold or np.abs(np.arcsin(normal[1])) < tilt_threshold
 
     return is_horizontal
-=======
-def points_collinear(points):
-    """
-    Check if three points in 3D space are collinear.
-    
-    Parameters:
-    points (numpy.ndarray): A 2D numpy array of shape (3, 3), where each row represents a point [x, y, z].
 
-    Returns:
-    bool: True if the points are collinear, False otherwise.
-    """
-    # Extract the three points
-    pt1, pt2, pt3 = points
-    
-    # Create vectors from the points
-    vec1 = pt2 - pt1
-    vec2 = pt3 - pt1
-    
-    # Compute the cross product of the two vectors
-    cross_product = np.cross(vec1, vec2)
-    
-    # If the cross product is [0, 0, 0], the points are collinear
-    return np.all(cross_product == 0)
-
->>>>>>> region_growing
 
 def distance_pt_to_plane(A, B, C, D, pt):
     """
