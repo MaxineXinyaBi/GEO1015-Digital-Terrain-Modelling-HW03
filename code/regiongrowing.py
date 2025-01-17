@@ -31,7 +31,7 @@ def detect(lazfile, params, viz=False):
     normals, linearity, planarity, sphericity = compute_normals_and_geometry_features(pts, k)
 
     # Step 2: Select seed points
-    seed_indices = select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity)
+    seed_indices = select_seed_pts(planarity, linearity, sphericity, min_planarity)
 
     # Step 3: Grow regions from seeds
     regions = region_growing(seed_indices, pts, k, max_angle, normals, min_region_size)
@@ -145,7 +145,7 @@ def compute_normals_and_geometry_features(pts, k):
     return normals, linearity, planarity, sphericity
 
 
-def select_seed_pts(pts, normals, planarity, linearity, sphericity, min_planarity):
+def select_seed_pts(planarity, linearity, sphericity, min_planarity):
     """choose seed points"""
     # good seed point should have least plane fitting error
     mask = (
